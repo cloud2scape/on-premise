@@ -1,0 +1,203 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+Vagrant.configure("2") do |config|
+  (1..6).each do |i|
+    config.vm.define "redis#{i}" do |node|
+      node.vm.box = "ubuntu/focal64"
+      node.vm.hostname = "redis#{i}"
+      node.vm.network "private_network", ip: "192.168.56.#{10+i}"
+
+      node.vm.provider "virtualbox" do |vb|
+        vb.memory = "1024"
+        vb.cpus = 1
+        vb.name = "redis-node#{i}"
+      end
+
+      node.vm.provision "shell", inline: <<-SHELL
+        # 기존 Redis 제거
+        systemctl stop redis-server || true
+        apt-get remove -y redis-server redis-tools || true
+        apt-get autoremove -y
+        
+        # 기본 패키지 업데이트 및 필요한 도구 설치
+        apt-get update
+        apt-get install -y curl build-essential tcl pkg-config
+
+        # Redis 소스 다운로드 및 설치
+        cd /tmp
+        curl -O https://download.redis.io/releases/redis-7.2.4.tar.gz
+        tar xzvf redis-7.2.4.tar.gz
+        cd redis-7.2.4
+        # 컴파일 옵션 추가
+        make MALLOC=libc
+        make install
+
+        # Redis 사용자 및 그룹 생성
+        groupadd -f redis
+        useradd -r -g redis -s /bin/false redis || true
+
+        # 기존 디렉토리 정리
+        rm -rf /var/lib/redis/*
+        rm -rf /var/log/redis/*
+        rm -rf /var/run/redis/*
+
+        # 필요한 디렉토리 생성 및 권한 설정
+        mkdir -p /etc/redis
+        mkdir -p /var/lib/redis
+        mkdir -p /var/log/redis
+        mkdir -p /var/run/redis
+
+        chown -R redis:redis /etc/redis
+        chown -R redis:redis /var/lib/redis
+        chown -R redis:redis /var/log/redis
+        chown -R redis:redis /var/run/redis
+        
+        chmod 755 /etc/redis
+        chmod 755 /var/lib/redis
+        chmod 755 /var/log/redis
+        chmod 755 /var/run/redis
+
+        # Redis 설정 파일 생성
+        cat > /etc/redis/redis.conf <<EOF
+# Network
+bind 0.0.0.0
+port 16503
+protected-mode no
+
+# Cluster
+cluster-enabled yes
+cluster-config-file /var/lib/redis/nodes.conf
+cluster-node-timeout 5000
+
+# General
+daemonize no
+supervised systemd
+pidfile /var/run/redis/redis-server.pid
+loglevel notice
+logfile /var/log/redis/redis-server.log
+
+# Memory
+maxmemory 800mb
+maxmemory-policy allkeys-lru
+
+# Performance
+io-threads 2
+io-threads-do-reads yes
+
+# Persistence
+dir /var/lib/redis
+appendonly yes
+appendfilename "appendonly.aof"
+appendfsync everysec
+
+# Client
+timeout 0
+tcp-keepalive 300
+
+# TLS
+tls-port 0
+
+# Security
+rename-command FLUSHALL ""
+rename-command FLUSHDB ""
+EOF
+
+        # Systemd 서비스 파일 생성
+        cat > /etc/systemd/system/redis-server.service <<EOF
+[Unit]
+Description=Redis In-Memory Data Store
+After=network.target
+Documentation=https://redis.io/documentation
+
+[Service]
+Type=simple
+User=redis
+Group=redis
+ExecStart=/usr/local/bin/redis-server /etc/redis/redis.conf
+Restart=always
+RestartSec=3
+LimitNOFILE=65535
+LimitCORE=infinity
+
+# Directories
+WorkingDirectory=/var/lib/redis
+RuntimeDirectory=redis
+RuntimeDirectoryMode=0755
+
+# Logging
+StandardOutput=append:/var/log/redis/redis-server.log
+StandardError=append:/var/log/redis/redis-server.log
+
+# Resources
+TimeoutStopSec=0
+SuccessExitStatus=143
+MemoryAccounting=yes
+MemoryHigh=800M
+MemoryMax=900M
+
+# Security
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ReadWritePaths=/var/lib/redis /var/log/redis /var/run/redis
+CapabilityBoundingSet=
+ProtectHome=yes
+PrivateDevices=yes
+ProtectClock=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+LockPersonality=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+        # Redis CLI 심볼릭 링크 생성
+        ln -sf /usr/local/bin/redis-cli /usr/bin/redis-cli
+
+        # 로그 파일 생성 및 권한 설정
+        touch /var/log/redis/redis-server.log
+        chown redis:redis /var/log/redis/redis-server.log
+        chmod 644 /var/log/redis/redis-server.log
+
+        # 서비스 시작 전 권한 재확인
+        chown -R redis:redis /etc/redis
+        chown -R redis:redis /var/lib/redis
+        chown -R redis:redis /var/log/redis
+        chown -R redis:redis /var/run/redis
+
+        # Systemd 재로드 및 Redis 서비스 시작
+        systemctl daemon-reload
+        systemctl enable redis-server
+        sleep 5
+        systemctl start redis-server
+        sleep 5
+
+        # 서비스 상태 및 로그 확인
+        systemctl status redis-server --no-pager
+        journalctl -u redis-server --no-pager
+        tail -n 50 /var/log/redis/redis-server.log
+      SHELL
+
+      # 마지막 노드에서 클러스터 구성
+      if i == 6
+        node.vm.provision "shell", inline: <<-SHELL
+          sleep 60  # 충분한 대기 시간
+          redis-cli --cluster create \
+            192.168.56.11:16503 \
+            192.168.56.12:16503 \
+            192.168.56.13:16503 \
+            192.168.56.14:16503 \
+            192.168.56.15:16503 \
+            192.168.56.16:16503 \
+            --cluster-replicas 1 --cluster-yes || {
+              echo "클러스터 생성 실패. 노드 상태 확인:"
+              redis-cli cluster nodes
+            }
+        SHELL
+      end
+    end
+  end
+end
