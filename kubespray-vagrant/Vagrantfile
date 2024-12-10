@@ -1,0 +1,71 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+vm_image = "ubuntu/jammy64"
+vm_name_prefix = "kube"
+vm_subnet = "192.168.56."
+
+number_of_control_planes = 1
+control_plane_cpus = 4
+control_plane_memory = 4096
+
+number_of_worker_nodes = 3
+worker_node_cpus = 2
+worker_node_memory = 2560
+
+VMS = (1..number_of_worker_nodes).map do |i|
+  {
+    name: "#{vm_name_prefix}-node#{i}",
+    image: vm_image,
+    cpus: worker_node_cpus,
+    memory: worker_node_memory,
+    ip: "#{vm_subnet}2#{i}"
+  }
+end
+
+VMS += (1..number_of_control_planes).map do |i|
+  {
+    name: "#{vm_name_prefix}-control#{i}",
+    image: vm_image,
+    cpus: control_plane_cpus,
+    memory: control_plane_memory,
+    ip: "#{vm_subnet}1#{i}"
+  }
+end
+
+control_shell_provision_configs = [
+  {
+    "name" => "1.cp-ssh-key.sh",
+    "path" => "scripts/1.cp-ssh-key.sh"
+  },
+  {
+    "name" => "3.setup-kubespray.sh",
+    "path" => "scripts/3.setup-kubespray.sh"
+  }
+]
+
+Vagrant.configure("2") do |config|
+  VMS.each do |vm|
+    config.vm.define vm[:name] do |node|
+      node.vm.hostname = vm[:name]
+      node.vm.box = vm[:image]
+      node.vm.network "private_network", ip: vm[:ip], nic_type: "virtio"
+
+      node.vm.provider "virtualbox" do |vb|
+        vb.linked_clone = false
+        vb.name = vm[:name]
+        vb.cpus = vm[:cpus]
+        vb.memory = vm[:memory]
+        vb.customize ['modifyvm', :id, '--nictype1', 'virtio']
+      end
+      node.vm.provision "shell", path: "scripts/0.setup-ssh.sh"
+
+      if vm[:name] == "#{vm_name_prefix}-control1"
+        control_shell_provision_configs.each do |script|
+          node.vm.synced_folder "files", "/home/vagrant/shared"
+          node.vm.provision "shell", path: script["path"], privileged: false
+        end
+      end
+    end
+  end
+end
