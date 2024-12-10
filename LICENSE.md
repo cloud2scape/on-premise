@@ -1,4 +1,19 @@
-![Untitled diagram-2024-12-10-082634](https://github.com/user-attachments/assets/a972bd9d-444f-47b4-b9f3-3b53ef59e74a)MIT License
+![Untitled diagram-2024-12-10-082634](https://github.com/user-attachments/assets/a972bd9d-444f-47b4-b9f3-3b53ef59e74a)
+
+vagrant 제공 파일
+1 redis cluster
+3 mysql cluster
+kubespray 1 control plane, 3 worker node
+
+vagrant up/halt/destroy
+order db는 직접 생성해야함
+
+
+
+
+
+
+MIT License
 
 Copyright (c) 2024 클라우드 스케이프
 
