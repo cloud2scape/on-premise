@@ -6,12 +6,12 @@ vm_name_prefix = "kube"
 vm_subnet = "192.168.56."
 
 number_of_control_planes = 1
-control_plane_cpus = 4
-control_plane_memory = 4096
+control_plane_cpus = 2
+control_plane_memory = 2560
 
-number_of_worker_nodes = 3
+number_of_worker_nodes = 2
 worker_node_cpus = 2
-worker_node_memory = 2560
+worker_node_memory = 4096
 
 VMS = (1..number_of_worker_nodes).map do |i|
   {
@@ -37,6 +37,10 @@ control_shell_provision_configs = [
   {
     "name" => "1.cp-ssh-key.sh",
     "path" => "scripts/1.cp-ssh-key.sh"
+  },
+  {
+    "name" => "2.install-packages.sh",
+    "path" => "scripts/2.install-packages.sh"
   },
   {
     "name" => "3.setup-kubespray.sh",
