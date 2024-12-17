@@ -41,3 +41,6 @@ source /etc/bash_completion.d/kubectl.sh
 
 # Kubernetes 클러스터 확인
 kubectl get nodes
+
+# kubeconfig 파일을 share 에 복사
+cp ~/.kube/config ~/shared/config
